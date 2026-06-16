@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <title>Flappy Mini - Schul-Projekt</title>
+  <style>
+    body { margin: 0; background: #87CEEB; font-family: sans-serif; user-select: none; }
+    #gameCanvas { display: block; margin: 0 auto; background: #70c5ce; border: 2px solid #000; }
+    #ui { text-align: center; margin-top: 8px; }
+    button { padding: 10px 16px; margin: 6px; font-size: 16px; }
+    .skin { display: inline-block; width: 24px; height: 24px; border: 1px solid #000; vertical-align: middle; margin-right: 6px; }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas" width="480" height="640"></canvas>
+  <div id="ui"></div>
+
+  <script>
+    // ----- Konstante Werte -----
+    const W = 480, H = 640;
+    const GROUND_Y = H - 80;
+    const GRAVITY = 0.35;
+    const FLAP_IMPULSE = -7.5;
+    const PIPE_GAP = 150;
+    const PIPE_WIDTH = 60;
+    const PIPE_SPACING_MIN = 180;
+    const PIPE_SPACING_MAX = 240;
+
+    // ----- Spielstände und State -----
+    let canvas, ctx;
+    let gameState = "menu"; // "menu" | "playing" | "gameover" | "paused"
+    let score = 0;
+    let highScore = 0;
+    let coins = 0;
+    let skinsUnlocked = [true, false, false]; // Beispiel: drei Skins, erst Skin 0 freigeschaltet
+    let selectedSkin = 0;
+    let shopOpened = false;
+    let spinsToday = 0;
+    let spinCost = 10;
+    let pipes = [];
+    let nextPipeIn = 0;
+    let bird; // Vogel
+    let velocity = 0;
+    let menuButtons = [];
+
+    // ----- Pixel-Vogel (eigenes Design) -----
+    function createBird() {
+      // einfacher Pixel-Vogel als Rechtecke
+      return {
+        x: 120,
+        y: H / 2,
+        w: 34,
+        h: 24,
+        color: "#ff0", // gelb
+        tilt: 0
+      };
+    }
+
+    function resetGame() {
+      score = 0;
+      pipes = [];
+      nextPipeIn = 120;
+      bird = createBird();
+      velocity = 0;
+      // initial two pipes
+      spawnPipe();
+      spawnPipe(true);
+    }
+
+    // ----- UI bauen -----
+    function renderMenu() {
+      const ui = document.getElementById("ui");
+      ui.innerHTML = "";
+      // Titel
+      const title = document.createElement("h2");
+      title.textContent = "Flappy Mini – Schulprojekt";
+      ui.appendChild(title);
+
+      // Buttons
+      const btnPlay = document.createElement("button");
+      btnPlay.textContent = "Spiel starten";
+      btnPlay.onclick = () => { gameState = "playing"; resetGame(); };
+      ui.appendChild(btnPlay);
+
+      const btnShop = document.createElement("button");
+      btnShop.textContent = "Glücksrad (Kosten 10 Münzen)";
+      btnShop.onclick = () => {
+        if (coins >= 10) {
+          spinsToday++;
+          coins -= 10;
+          // Du kannst hier eine einfache Spin-Animation hinzufügen
+          // Für Demo: einfache Zufalls-Skin-Zuweisung
+          alert("Du hast am Glücksrad gedreht! (Demo: Skin erhalten)");
+        } else {
+          alert("Nicht genug Münzen!");
+        }
+      };
+      ui.appendChild(btnShop);
+
+      const btnSkins = document.createElement("button");
+      btnSkins.textContent = "Skins auswählen";
+      btnSkins.onclick = () => { shopOpened = !shopOpened; renderMenu(); };
+      ui.appendChild(btnSkins);
+
+      // Skin-Anzeige
+      const skinInfo = document.createElement("div");
+      skinInfo.style.marginTop = "6px";
+      skinInfo.innerHTML = `Aktiver Skin: <strong>${selectedSkin}</strong> &nbsp; Münzen: <strong>${coins}</strong>`;
+      ui.appendChild(skinInfo);
+
+      // Skin-Shop (inline)
+      if (shopOpened) {
+        const shop = document.createElement("div");
+        shop.style.marginTop = "8px";
+        shop.innerHTML = `
+          <div><strong>Skins-Shop</strong> (Kosten 10 Münzen)</div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+            <div class="skin" style="background:#f66" title="Skin 1"></div>
+            <button onclick="unlockSkin(1)" ${skinsUnlocked[1] ? "disabled" : ""}>Entsperre Skin 2</button>
+          </div>
+          <div style="margin-top:6px;">
+            <div class="skin" style="background:#6cf" title="Skin 2"></div>
+            <button onclick="unlockSkin(2)" ${skinsUnlocked[2] ? "disabled" : ""}>Entsperre Skin 3</button>
+          </div>
+        `;
+        ui.appendChild(shop);
+      }
+    }
+
+    // Skin freischalten (Demo)
+    function unlockSkin(index) {
+      if (coins < 10) {
+        alert("Nicht genug Münzen!");
+        return;
+      }
+      if (!skinsUnlocked[index]) {
+        coins -= 10;
+        skinsUnlocked[index] = true;
+        selectedSkin = index;
+        alert("Skin freigeschaltet!");
+        renderMenu();
+      }
+    }
+
+    // ----- Spiel-Logik -----
+    function spawnPipe(forceTop = false) {
+      // obere Pipe unten Plankosten
+      const gapTop = (Math.random() * (H - PIPE_GAP - 200)) + 50;
+      const x = W + PIPE_WIDTH;
+      pipes.push({
+        x: x,
+        yTop: gapTop,
+        yBottom: gapTop + PIPE_GAP,
+        passed: false
+      });
+    }
+
+    function updateGame() {
+      // Vogel fliegen
+      velocity += GRAVITY;
+      bird.y += velocity;
+
+      // Boden-Kollision
+      if (bird.y + bird.h >= GROUND_Y) {
+        bird.y = GROUND_Y - bird.h;
+        endGame();
+      }
+      // Decke-Kollision (optional)
+      if (bird.y < 0) {
+        bird.y = 0;
+        velocity = 0;
+      }
+
+      // Röhren bewegen
+      for (let p of pipes) {
+        p.x -= 2.5;
+        // Score, wenn Bird passst
+        if (!p.passed && p.x + PIPE_WIDTH < bird.x) {
+          p.passed = true;
+          score++;
+        }
+        // Kollision
+        const withinX = bird.x + bird.w > p.x && bird.x < p.x + PIPE_WIDTH;
+        const topHit = bird.y < p.yTop;
+        const bottomHit = bird.y + bird.h > p.yBottom;
+        if (withinX && (topHit || bottomHit)) {
+          endGame();
+        }
+      }
+
+      // Neue Pipes generieren
+      if (pipes.length < 3 || (pipes[pipes.length - 1] && pipes[pipes.length - 1].x < W - 200)) {
+        if (pipes.length === 0 || pipes[pipes.length - 1].x < W - PIPE_SPACING_MIN) {
+          spawnPipe();
+        }
+      }
+
+      // Münzen: 10 Röhren => 1 Münze
+      // Zähler-Logik hier einfach umgesetzt:
+      const totalRohrenDurchflogen = pipes.filter(p => p.x + PIPE_WIDTH < 0).length;
+      // Für Demo: Abzug der Münzen hier nicht nötig, aber Platzhalter
+    }
+
+    function endGame() {
+      if (gameState !== "playing") return;
+      gameState = "gameover";
+      if (score > highScore) highScore = score;
+      // Persistierte Werte (optional lokale Speicherung)
+      // localStorage.setItem("flappy_highscore", highScore);
+    }
+
+    function drawBird(ctx) {
+      // Einfacher Vogel: Körper als gelbes Rechteck mit Schnabel
+      ctx.fillStyle = "#ffd400";
+      ctx.fillRect(bird.x, bird.y, bird.w, bird.h);
+      // Schnabel
+      ctx.fillStyle = "#f90";
+      ctx.beginPath();
+      ctx.moveTo(bird.x + bird.w, bird.y + bird.h / 2);
+      ctx.lineTo(bird.x + bird.w + 6, bird.y + bird.h / 2 - 4);
+      ctx.lineTo(bird.x + bird.w, bird.y + bird.h / 2 + 4);
+      ctx.fill();
+      // Flügel (kleiner Pfeil)
+      ctx.fillStyle = "#ff0";
+      ctx.fillRect(bird.x + 6, bird.y + 6, 6, 4);
+    }
+
+    function drawPipes(ctx) {
+      ctx.fillStyle = "#0a7e0a";
+      for (let p of pipes) {
+        // obere Rohr
+        ctx.fillRect(p.x, 0, PIPE_WIDTH, p.yTop);
+        // untere Rohr
+        ctx.fillRect(p.x, p.yBottom, PIPE_WIDTH, H - p.yBottom);
+      }
+    }
+
+    function drawGround(ctx) {
+      ctx.fillStyle = "#8b5a2b";
+      ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+      // Floor stripes
+      ctx.fillStyle = "#6b3f0b";
+      for (let i = 0; i < W; i += 20) {
+        ctx.fillRect(i, GROUND_Y + 40, 10, 6);
+      }
+    }
+
+    function render() {
+      ctx.clearRect(0, 0, W, H);
+
+      // Hintergrund-Layer (vereinfachte Parallax)
+      ctx.fillStyle = "#87cefa";
+      ctx.fillRect(0, 0, W, H);
+
+      drawPipes(ctx);
+      drawGround(ctx);
+      drawBird(ctx);
+
+      // Score
+      ctx.fillStyle = "#000";
+      ctx.font = "20px sans-serif";
+      ctx.fillText("Score: " + score, 10, 30);
+      ctx.fillText("High: " + highScore, 10, 54);
+    }
+
+    // Tastatur & Maus
+    function onInput() {
+      if (gameState === "playing") {
+        velocity = FLAP_IMPULSE;
+      } else if (gameState === "menu" || gameState === "gameover") {
+        // Start beim Klick/Tastendruck
+        gameState = "playing";
+        resetGame();
+      }
+    }
+
+    // ----- Init -----
+    function init() {
+      canvas = document.getElementById("gameCanvas");
+      ctx = canvas.getContext("2d");
+
+      // Bereiche
+      canvas.addEventListener("mousedown", onInput);
+      window.addEventListener("keydown", (e) => {
+        if (e.code === "Space" || e.code === "ArrowUp" || e.key === "w" || e.key === "W") {
+          onInput();
+        }
+        // Neustart im Gameover per Enter
+        if (gameState === "gameover" && e.code === "Enter") {
+          gameState = "playing";
+          resetGame();
+        }
+      });
+
+      // Initial-States
+      highScore = 0;
+      coins = 0;
+      resetGame();
+
+      // Spielloop
+      function loop() {
+        // Update nur im Spielzustand
+        if (gameState === "playing") {
+          updateGame();
+        } else if (gameState === "menu" || gameState === "gameover") {
+          // nichts
+        }
+        render();
+        requestAnimationFrame(loop);
+      }
+      loop();
+      renderMenu();
+    }
+
+    // Externe Zugriffe für Shop (Beispiel)
+    window.unlockSkin = unlockSkin; // sichtbar für Button-Handler
+
+    // Start
+    window.addEventListener("load", init);
+  </script>
+</body>
+</html>
