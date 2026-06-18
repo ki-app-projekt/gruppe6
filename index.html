@@ -1,322 +1,730 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="utf-8" />
-  <title>Flappy Mini - Schul-Projekt</title>
-  <style>
-    body { margin: 0; background: #87CEEB; font-family: sans-serif; user-select: none; }
-    #gameCanvas { display: block; margin: 0 auto; background: #70c5ce; border: 2px solid #000; }
-    #ui { text-align: center; margin-top: 8px; }
-    button { padding: 10px 16px; margin: 6px; font-size: 16px; }
-    .skin { display: inline-block; width: 24px; height: 24px; border: 1px solid #000; vertical-align: middle; margin-right: 6px; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Flappy World Deluxe</title>
+
+<style>
+
+body{
+    margin:0;
+    background:#70c5ce;
+    font-family:Arial,sans-serif;
+    text-align:center;
+}
+
+canvas{
+    display:block;
+    margin:12px auto 10px auto;
+    border:3px solid black;
+    background:#70c5ce;
+    max-width:96vw;
+    height:auto;
+    touch-action:manipulation;
+}
+
+button{
+    padding:10px 20px;
+    margin:5px;
+    font-size:18px;
+    cursor:pointer;
+    border-radius:8px;
+    border:2px solid #333;
+    background:white;
+    touch-action:manipulation;
+}
+
+button:hover{
+    background:#eee;
+}
+
+#menu{
+    margin-top:10px;
+}
+
+#controls{
+    margin-top:10px;
+}
+
+#jumpBtn{
+    width:260px;
+    height:75px;
+    font-size:30px;
+    font-weight:bold;
+    background:#ffd700;
+    border:3px solid black;
+    border-radius:15px;
+}
+
+</style>
 </head>
+
 <body>
-  <canvas id="gameCanvas" width="480" height="640"></canvas>
-  <div id="ui"></div>
 
-  <script>
-    // ----- Konstante Werte -----
-    const W = 480, H = 640;
-    const GROUND_Y = H - 80;
-    const GRAVITY = 0.35;
-    const FLAP_IMPULSE = -7.5;
-    const PIPE_GAP = 150;
-    const PIPE_WIDTH = 60;
-    const PIPE_SPACING_MIN = 180;
-    const PIPE_SPACING_MAX = 240;
+<canvas id="game" width="480" height="640"></canvas>
 
-    // ----- Spielstände und State -----
-    let canvas, ctx;
-    let gameState = "menu"; // "menu" | "playing" | "gameover" | "paused"
-    let score = 0;
-    let highScore = 0;
-    let coins = 0;
-    let skinsUnlocked = [true, false, false]; // Beispiel: drei Skins, erst Skin 0 freigeschaltet
-    let selectedSkin = 0;
-    let shopOpened = false;
-    let spinsToday = 0;
-    let spinCost = 10;
-    let pipes = [];
-    let nextPipeIn = 0;
-    let bird; // Vogel
-    let velocity = 0;
-    let menuButtons = [];
+<div id="controls"></div>
 
-    // ----- Pixel-Vogel (eigenes Design) -----
-    function createBird() {
-      // einfacher Pixel-Vogel als Rechtecke
-      return {
-        x: 120,
-        y: H / 2,
-        w: 34,
-        h: 24,
-        color: "#ff0", // gelb
-        tilt: 0
-      };
-    }
+<div id="menu"></div>
 
-    function resetGame() {
-      score = 0;
-      pipes = [];
-      nextPipeIn = 120;
-      bird = createBird();
-      velocity = 0;
-      // initial two pipes
-      spawnPipe();
-      spawnPipe(true);
-    }
+<script>
 
-    // ----- UI bauen -----
-    function renderMenu() {
-      const ui = document.getElementById("ui");
-      ui.innerHTML = "";
-      // Titel
-      const title = document.createElement("h2");
-      title.textContent = "Flappy Mini – Schulprojekt";
-      ui.appendChild(title);
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
 
-      // Buttons
-      const btnPlay = document.createElement("button");
-      btnPlay.textContent = "Spiel starten";
-      btnPlay.onclick = () => { gameState = "playing"; resetGame(); };
-      ui.appendChild(btnPlay);
+let state = "menu";
+let score = 0;
 
-      const btnShop = document.createElement("button");
-      btnShop.textContent = "Glücksrad (Kosten 10 Münzen)";
-      btnShop.onclick = () => {
-        if (coins >= 10) {
-          spinsToday++;
-          coins -= 10;
-          // Du kannst hier eine einfache Spin-Animation hinzufügen
-          // Für Demo: einfache Zufalls-Skin-Zuweisung
-          alert("Du hast am Glücksrad gedreht! (Demo: Skin erhalten)");
-        } else {
-          alert("Nicht genug Münzen!");
-        }
-      };
-      ui.appendChild(btnShop);
+let highscore =
+Number(localStorage.getItem("highscore")) || 0;
 
-      const btnSkins = document.createElement("button");
-      btnSkins.textContent = "Skins auswählen";
-      btnSkins.onclick = () => { shopOpened = !shopOpened; renderMenu(); };
-      ui.appendChild(btnSkins);
+let selectedSkin =
+Number(localStorage.getItem("skin")) || 0;
 
-      // Skin-Anzeige
-      const skinInfo = document.createElement("div");
-      skinInfo.style.marginTop = "6px";
-      skinInfo.innerHTML = `Aktiver Skin: <strong>${selectedSkin}</strong> &nbsp; Münzen: <strong>${coins}</strong>`;
-      ui.appendChild(skinInfo);
+let mode = "normal";
 
-      // Skin-Shop (inline)
-      if (shopOpened) {
-        const shop = document.createElement("div");
-        shop.style.marginTop = "8px";
-        shop.innerHTML = `
-          <div><strong>Skins-Shop</strong> (Kosten 10 Münzen)</div>
-          <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
-            <div class="skin" style="background:#f66" title="Skin 1"></div>
-            <button onclick="unlockSkin(1)" ${skinsUnlocked[1] ? "disabled" : ""}>Entsperre Skin 2</button>
-          </div>
-          <div style="margin-top:6px;">
-            <div class="skin" style="background:#6cf" title="Skin 2"></div>
-            <button onclick="unlockSkin(2)" ${skinsUnlocked[2] ? "disabled" : ""}>Entsperre Skin 3</button>
-          </div>
-        `;
-        ui.appendChild(shop);
-      }
-    }
+/* ---- Online-Highscore-Liste (jsonbin.io) ---- */
+const BIN_ID = "6a339ef2f5f4af5e2906fe3d";
+const ACCESS_KEY = "$2a$10$6p/Jg.50A26s6qA4bM8Ia.ypxQ9I64QlrlzbnSCgOvzPd51.eDWd.";
+const BIN_URL = "https://api.jsonbin.io/v3/b/" + BIN_ID;
+let leaderboardData = [];
+let playerName = localStorage.getItem("flappyName") || "Spieler";
 
-    // Skin freischalten (Demo)
-    function unlockSkin(index) {
-      if (coins < 10) {
-        alert("Nicht genug Münzen!");
-        return;
-      }
-      if (!skinsUnlocked[index]) {
-        coins -= 10;
-        skinsUnlocked[index] = true;
-        selectedSkin = index;
-        alert("Skin freigeschaltet!");
-        renderMenu();
-      }
-    }
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
 
-    // ----- Spiel-Logik -----
-    function spawnPipe(forceTop = false) {
-      // obere Pipe unten Plankosten
-      const gapTop = (Math.random() * (H - PIPE_GAP - 200)) + 50;
-      const x = W + PIPE_WIDTH;
-      pipes.push({
-        x: x,
-        yTop: gapTop,
-        yBottom: gapTop + PIPE_GAP,
-        passed: false
-      });
-    }
+async function fetchLeaderboard(){
+  try{
+    const res = await fetch(BIN_URL + "/latest", { headers:{ "X-Access-Key": ACCESS_KEY } });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    const rec = data.record;
+    if(Array.isArray(rec)) leaderboardData = rec;
+    else if(rec && Array.isArray(rec.leaderboard)) leaderboardData = rec.leaderboard;
+    else leaderboardData = [];
+  }catch(e){ console.warn("Highscore laden fehlgeschlagen:", e); }
+  leaderboardData.sort((a,b)=>Number(b.score)-Number(a.score));
+  return leaderboardData;
+}
 
-    function updateGame() {
-      // Vogel fliegen
-      velocity += GRAVITY;
-      bird.y += velocity;
+async function putLeaderboard(){
+  try{
+    const res = await fetch(BIN_URL, {
+      method:"PUT",
+      headers:{
+        "Content-Type":"application/json",
+        "X-Access-Key": ACCESS_KEY,
+        "X-Bin-Versioning":"false"
+      },
+      body: JSON.stringify(leaderboardData)
+    });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+  }catch(e){ console.warn("Highscore speichern fehlgeschlagen:", e); }
+}
 
-      // Boden-Kollision
-      if (bird.y + bird.h >= GROUND_Y) {
-        bird.y = GROUND_Y - bird.h;
-        endGame();
-      }
-      // Decke-Kollision (optional)
-      if (bird.y < 0) {
-        bird.y = 0;
-        velocity = 0;
-      }
+async function submitScore(s){
+  await fetchLeaderboard();
+  const existing = leaderboardData.find(e => e.name === playerName);
+  if(existing){
+    if(s > (Number(existing.score)||0)){ existing.score = s; existing.mode = mode; }
+  } else {
+    leaderboardData.push({ name: playerName, score: s, mode: mode });
+  }
+  leaderboardData.sort((a,b)=>Number(b.score)-Number(a.score));
+  leaderboardData = leaderboardData.slice(0,10);
+  await putLeaderboard();
+}
 
-      // Röhren bewegen
-      for (let p of pipes) {
-        p.x -= 2.5;
-        // Score, wenn Bird passst
-        if (!p.passed && p.x + PIPE_WIDTH < bird.x) {
-          p.passed = true;
-          score++;
-        }
-        // Kollision
-        const withinX = bird.x + bird.w > p.x && bird.x < p.x + PIPE_WIDTH;
-        const topHit = bird.y < p.yTop;
-        const bottomHit = bird.y + bird.h > p.yBottom;
-        if (withinX && (topHit || bottomHit)) {
-          endGame();
-        }
-      }
+function leaderboardHTML(){
+  if(!leaderboardData.length) return "<i>Noch keine Einträge</i>";
+  return "<ol style='text-align:left;display:inline-block;margin:6px auto;padding-left:22px;'>" +
+    leaderboardData.slice(0,10).map(e =>
+      `<li><b>${escapeHtml(e.name)}</b> – ${Number(e.score)||0}` +
+      `${e.mode ? ` <span style="color:#555;font-size:13px">(${escapeHtml(e.mode)})</span>` : ""}</li>`
+    ).join("") + "</ol>";
+}
 
-      // Neue Pipes generieren
-      if (pipes.length < 3 || (pipes[pipes.length - 1] && pipes[pipes.length - 1].x < W - 200)) {
-        if (pipes.length === 0 || pipes[pipes.length - 1].x < W - PIPE_SPACING_MIN) {
-          spawnPipe();
-        }
-      }
+function changeName(){
+  const n = prompt("Dein Name für die Highscore-Liste:", playerName);
+  if(n && n.trim()){
+    playerName = n.trim().slice(0,16);
+    localStorage.setItem("flappyName", playerName);
+    if(state === "menu") showMenu();
+  }
+}
 
-      // Münzen: 10 Röhren => 1 Münze
-      // Zähler-Logik hier einfach umgesetzt:
-      const totalRohrenDurchflogen = pipes.filter(p => p.x + PIPE_WIDTH < 0).length;
-      // Für Demo: Abzug der Münzen hier nicht nötig, aber Platzhalter
-    }
+let skins = [
+"#ffd400",
+"#ff3333",
+"#3399ff",
+"#33cc66",
+"#bb55ff",
+"#ffd700"
+];
 
-    function endGame() {
-      if (gameState !== "playing") return;
-      gameState = "gameover";
-      if (score > highScore) highScore = score;
-      // Persistierte Werte (optional lokale Speicherung)
-      // localStorage.setItem("flappy_highscore", highScore);
-    }
+let modes = {
 
-    function drawBird(ctx) {
-      // Einfacher Vogel: Körper als gelbes Rechteck mit Schnabel
-      ctx.fillStyle = "#ffd400";
-      ctx.fillRect(bird.x, bird.y, bird.w, bird.h);
-      // Schnabel
-      ctx.fillStyle = "#f90";
-      ctx.beginPath();
-      ctx.moveTo(bird.x + bird.w, bird.y + bird.h / 2);
-      ctx.lineTo(bird.x + bird.w + 6, bird.y + bird.h / 2 - 4);
-      ctx.lineTo(bird.x + bird.w, bird.y + bird.h / 2 + 4);
-      ctx.fill();
-      // Flügel (kleiner Pfeil)
-      ctx.fillStyle = "#ff0";
-      ctx.fillRect(bird.x + 6, bird.y + 6, 6, 4);
-    }
+normal:{
+speed:3,
+gap:160,
+night:false
+},
 
-    function drawPipes(ctx) {
-      ctx.fillStyle = "#0a7e0a";
-      for (let p of pipes) {
-        // obere Rohr
-        ctx.fillRect(p.x, 0, PIPE_WIDTH, p.yTop);
-        // untere Rohr
-        ctx.fillRect(p.x, p.yBottom, PIPE_WIDTH, H - p.yBottom);
-      }
-    }
+schwer:{
+speed:5,
+gap:120,
+night:false
+},
 
-    function drawGround(ctx) {
-      ctx.fillStyle = "#8b5a2b";
-      ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
-      // Floor stripes
-      ctx.fillStyle = "#6b3f0b";
-      for (let i = 0; i < W; i += 20) {
-        ctx.fillRect(i, GROUND_Y + 40, 10, 6);
-      }
-    }
+entspannt:{
+speed:2,
+gap:210,
+night:false
+},
 
-    function render() {
-      ctx.clearRect(0, 0, W, H);
+nacht:{
+speed:3.5,
+gap:150,
+night:true
+}
 
-      // Hintergrund-Layer (vereinfachte Parallax)
-      ctx.fillStyle = "#87cefa";
-      ctx.fillRect(0, 0, W, H);
+};
 
-      drawPipes(ctx);
-      drawGround(ctx);
-      drawBird(ctx);
+let bird;
+let velocity = 0;
 
-      // Score
-      ctx.fillStyle = "#000";
-      ctx.font = "20px sans-serif";
-      ctx.fillText("Score: " + score, 10, 30);
-      ctx.fillText("High: " + highScore, 10, 54);
-    }
+let pipes = [];
+let trees = [];
 
-    // Tastatur & Maus
-    function onInput() {
-      if (gameState === "playing") {
-        velocity = FLAP_IMPULSE;
-      } else if (gameState === "menu" || gameState === "gameover") {
-        // Start beim Klick/Tastendruck
-        gameState = "playing";
-        resetGame();
-      }
-    }
+let flapFrame = 0;
+let flapSpeed = 0;
 
-    // ----- Init -----
-    function init() {
-      canvas = document.getElementById("gameCanvas");
-      ctx = canvas.getContext("2d");
+function spawnTrees(){
 
-      // Bereiche
-      canvas.addEventListener("mousedown", onInput);
-      window.addEventListener("keydown", (e) => {
-        if (e.code === "Space" || e.code === "ArrowUp" || e.key === "w" || e.key === "W") {
-          onInput();
-        }
-        // Neustart im Gameover per Enter
-        if (gameState === "gameover" && e.code === "Enter") {
-          gameState = "playing";
-          resetGame();
-        }
-      });
+trees=[];
 
-      // Initial-States
-      highScore = 0;
-      coins = 0;
-      resetGame();
+[30,220,390].forEach(x=>{
 
-      // Spielloop
-      function loop() {
-        // Update nur im Spielzustand
-        if (gameState === "playing") {
-          updateGame();
-        } else if (gameState === "menu" || gameState === "gameover") {
-          // nichts
-        }
-        render();
-        requestAnimationFrame(loop);
-      }
-      loop();
-      renderMenu();
-    }
+trees.push({
+x:x,
+y:520
+});
 
-    // Externe Zugriffe für Shop (Beispiel)
-    window.unlockSkin = unlockSkin; // sichtbar für Button-Handler
+});
 
-    // Start
-    window.addEventListener("load", init);
-  </script>
+}
+
+function startGame(){
+
+state="playing";
+
+score=0;
+velocity=0;
+
+bird={
+x:120,
+y:300
+};
+
+pipes=[];
+
+spawnPipe();
+spawnTrees();
+
+document.getElementById(
+"menu"
+).innerHTML="";
+
+document.getElementById(
+"controls"
+).innerHTML=`
+
+<button id="jumpBtn">
+⬆ SPRINGEN
+</button>
+
+`;
+
+document
+.getElementById("jumpBtn")
+.addEventListener(
+"mousedown",
+flap
+);
+
+document
+.getElementById("jumpBtn")
+.addEventListener(
+"touchstart",
+flap
+);
+
+}
+
+function spawnPipe(){
+
+let m=modes[mode];
+
+let top=
+Math.random()*250+60;
+
+pipes.push({
+
+x:480,
+top:top,
+bottom:top+m.gap,
+done:false
+
+});
+
+}
+
+function update(){
+
+let m=modes[mode];
+
+velocity+=0.25;
+
+bird.y+=velocity;
+
+if(bird.y>585){
+
+gameOver();
+
+}
+
+pipes.forEach(p=>{
+
+p.x-=m.speed;
+
+if(
+
+bird.x+22>p.x &&
+bird.x-22<p.x+60 &&
+
+(
+bird.y-16<p.top ||
+bird.y+16>p.bottom
+)
+
+){
+
+gameOver();
+
+}
+
+if(
+!p.done &&
+p.x+60<bird.x
+){
+
+p.done=true;
+score++;
+
+}
+
+});
+
+pipes=
+pipes.filter(
+p=>p.x>-100
+);
+
+if(
+
+pipes.length===0 ||
+
+pipes[pipes.length-1].x<250
+
+){
+
+spawnPipe();
+
+}
+
+trees.forEach(t=>{
+
+t.x-=m.speed*0.5;
+
+if(t.x<-80){
+
+t.x=
+520+
+Math.random()*120;
+
+}
+
+});
+
+flapSpeed++;
+
+if(flapSpeed%6===0){
+
+flapFrame=
+(flapFrame+1)%3;
+
+}
+
+}function cloud(x,y){
+
+ctx.fillStyle="white";
+ctx.beginPath();
+ctx.arc(x,y,25,0,Math.PI*2);
+ctx.arc(x+30,y-10,30,0,Math.PI*2);
+ctx.arc(x+60,y,25,0,Math.PI*2);
+ctx.fill();
+
+}
+
+function tree(x){
+
+ctx.fillStyle="#8b4513";
+ctx.fillRect(x,520,25,80);
+
+ctx.fillStyle="#228b22";
+ctx.beginPath();
+ctx.arc(x+12,500,50,0,Math.PI*2);
+ctx.fill();
+
+}
+
+function drawBackground(){
+
+let night=modes[mode].night;
+
+ctx.fillStyle=night?"#11113d":"#70c5ce";
+ctx.fillRect(0,0,480,640);
+
+if(night){
+
+ctx.fillStyle="white";
+ctx.beginPath();
+ctx.arc(400,80,35,0,Math.PI*2);
+ctx.fill();
+
+}else{
+
+ctx.fillStyle="#ffd93d";
+ctx.beginPath();
+ctx.arc(400,80,45,0,Math.PI*2);
+ctx.fill();
+
+}
+
+if(!night){
+
+cloud(40,100);
+cloud(220,150);
+cloud(340,90);
+
+}
+
+trees.forEach(t=>tree(t.x));
+
+}
+
+function drawBird(){
+
+let angle=velocity*0.08;
+
+ctx.save();
+ctx.translate(bird.x,bird.y);
+ctx.rotate(angle);
+
+ctx.fillStyle=skins[selectedSkin];
+
+ctx.beginPath();
+ctx.ellipse(0,0,22,16,0,0,Math.PI*2);
+ctx.fill();
+
+ctx.fillStyle="white";
+ctx.beginPath();
+ctx.ellipse(-5,7,10,5,0,0,Math.PI*2);
+ctx.fill();
+
+ctx.fillStyle="black";
+ctx.beginPath();
+ctx.arc(12,-8,4,0,Math.PI*2);
+ctx.fill();
+
+ctx.fillStyle="orange";
+ctx.beginPath();
+ctx.moveTo(20,-4);
+ctx.lineTo(35,2);
+ctx.lineTo(20,8);
+ctx.fill();
+
+ctx.fillStyle="rgba(0,0,0,0.25)";
+
+if(flapFrame===0){
+ctx.beginPath();
+ctx.ellipse(-5,0,10,6,0,0,Math.PI*2);
+ctx.fill();
+}else if(flapFrame===1){
+ctx.beginPath();
+ctx.ellipse(-5,5,10,6,0,0,Math.PI*2);
+ctx.fill();
+}else{
+ctx.beginPath();
+ctx.ellipse(-5,-5,10,6,0,0,Math.PI*2);
+ctx.fill();
+}
+
+ctx.restore();
+
+}
+
+function draw(){
+
+ctx.clearRect(0,0,480,640);
+
+drawBackground();
+
+/* MARIOS RÖHREN */
+
+pipes.forEach(p=>{
+
+// oben
+ctx.fillStyle="#2ecc40";
+ctx.fillRect(p.x,0,60,p.top);
+
+// Schatten
+ctx.fillStyle="#1d8c2d";
+ctx.fillRect(p.x+45,0,10,p.top);
+
+// Kopf oben
+ctx.fillStyle="#44ff66";
+ctx.fillRect(p.x-8,p.top-20,76,20);
+
+// unten
+ctx.fillStyle="#2ecc40";
+ctx.fillRect(p.x,p.bottom,60,640-p.bottom);
+
+// Schatten
+ctx.fillStyle="#1d8c2d";
+ctx.fillRect(p.x+45,p.bottom,10,640-p.bottom);
+
+// Kopf unten
+ctx.fillStyle="#44ff66";
+ctx.fillRect(p.x-8,p.bottom,76,20);
+
+});
+
+/* Boden */
+
+ctx.fillStyle="#9b6b35";
+ctx.fillRect(0,600,480,40);
+
+if(state==="playing"||state==="gameover"){
+drawBird();
+}
+
+/* Score */
+
+ctx.fillStyle="black";
+ctx.font="25px Arial";
+ctx.fillText("Score: "+score,10,30);
+ctx.fillText("Best: "+highscore,10,60);
+
+if(state==="gameover"){
+
+ctx.fillStyle="rgba(0,0,0,0.5)";
+ctx.fillRect(0,0,480,640);
+
+ctx.fillStyle="white";
+ctx.font="40px Arial";
+ctx.fillText("GAME OVER",130,300);
+
+}
+
+}function gameOver(){
+
+if(state!=="playing")return;
+
+state="gameover";
+
+document.getElementById("controls").innerHTML="";
+
+if(score>highscore){
+highscore=score;
+localStorage.setItem("highscore",highscore);
+}
+
+document.getElementById("menu").innerHTML=`
+
+<h2>💥 Verloren</h2>
+
+<p>Score: <b>${score}</b> · Spieler: <b>${escapeHtml(playerName)}</b></p>
+
+<button onclick="startGame()">🔄 Nochmal</button>
+<button onclick="showMenu()">🏠 Menü</button>
+
+<h3>🏆 Highscore-Liste</h3>
+<div id="lblist">Speichere …</div>
+
+`;
+
+submitScore(score).then(()=>{
+const el=document.getElementById("lblist");
+if(el) el.innerHTML = leaderboardHTML();
+});
+
+}
+
+function flap(){
+
+if(state==="playing"){
+velocity=-6.5;
+}
+
+}
+
+canvas.addEventListener("mousedown",flap);
+canvas.addEventListener("touchstart",e=>{e.preventDefault();flap();},{passive:false});
+
+document.addEventListener("keydown",e=>{
+if(e.code==="Space"||e.code==="ArrowUp"){
+flap();
+}
+});
+
+function showMenu(){
+
+state="menu";
+
+document.getElementById("controls").innerHTML="";
+
+document.getElementById("menu").innerHTML=`
+
+<h1>🐦 Flappy World</h1>
+
+<button onclick="startGame()">▶ Start</button>
+
+<p>Spieler: <b>${escapeHtml(playerName)}</b>
+<button onclick="changeName()">✏ Name ändern</button></p>
+
+<h3>Modi</h3>
+
+<button onclick="mode='normal';showMenu()">Normal</button>
+<button onclick="mode='schwer';showMenu()">Schwer</button>
+<button onclick="mode='entspannt';showMenu()">Entspannt</button>
+<button onclick="mode='nacht';showMenu()">Nacht</button>
+
+<h3>Skins</h3>
+
+${skins.map((c,i)=>`
+
+<button onclick="chooseSkin(${i})"
+style="
+width:55px;
+height:55px;
+border-radius:50%;
+background:white;
+display:inline-flex;
+justify-content:center;
+align-items:center;
+">
+
+<div style="
+width:24px;
+height:18px;
+background:${c};
+border-radius:50%;
+position:relative;
+">
+
+<div style="
+position:absolute;
+right:-7px;
+top:5px;
+width:0;
+height:0;
+border-top:4px solid transparent;
+border-bottom:4px solid transparent;
+border-left:8px solid orange;
+"></div>
+
+<div style="
+position:absolute;
+right:4px;
+top:3px;
+width:4px;
+height:4px;
+background:black;
+border-radius:50%;
+"></div>
+
+</div>
+
+</button>
+
+`).join("")}
+
+<p>
+Modus: <b>${mode}</b> · Best (lokal): <b>${highscore}</b>
+</p>
+
+<h3>🏆 Highscore-Liste</h3>
+<div id="lblist">${leaderboardHTML()}</div>
+
+`;
+
+}
+
+function chooseSkin(i){
+selectedSkin=i;
+localStorage.setItem("skin",i);
+showMenu();
+}
+
+function startGame(){
+
+state="playing";
+
+score=0;
+velocity=0;
+
+bird={x:120,y:300};
+
+pipes=[];
+spawnPipe();
+spawnTrees();
+
+document.getElementById("menu").innerHTML="";
+
+document.getElementById("controls").innerHTML=`
+<button id="jumpBtn">⬆ SPRINGEN</button>
+`;
+
+document.getElementById("jumpBtn").addEventListener("mousedown",flap);
+document.getElementById("jumpBtn").addEventListener("touchstart",e=>{e.preventDefault();flap();},{passive:false});
+
+}
+
+function loop(){
+
+if(state==="playing"){
+update();
+}
+
+draw();
+requestAnimationFrame(loop);
+
+}
+
+/* START */
+
+spawnTrees();
+showMenu();
+loop();
+
+/* Highscore-Liste vom Server laden und Menü aktualisieren */
+fetchLeaderboard().then(()=>{ if(state==="menu") showMenu(); });
+
+</script>
+
 </body>
 </html>
